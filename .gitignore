@@ -71,6 +71,12 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# API anahtarları ve gizli bilgiler
+.env
+
+# Trial geçmişi (çalışma zamanında oluşturulur)
+server/trials.json
+
 # User-specific configuration files
 *.user
 *.workspace # General workspace files, can be from various tools

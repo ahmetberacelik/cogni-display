@@ -12,5 +12,7 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\bera\\Desktop\\iot\\cogni-display\\build"
-  ]
+  ],
+  "idf.portWin": "COM6",
+  "idf.flashType": "UART"
 }
