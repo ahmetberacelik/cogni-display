@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CogniDisplay</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: #f8fafc;
+      color: #334155;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 40px 48px;
+    }
+
+    /* ── Top Bar ── */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #1e293b;
+      letter-spacing: -0.5px;
+    }
+    .header p {
+      color: #64748b;
+      font-size: 0.85rem;
+      margin-top: 4px;
+    }
+
+    /* ── ESP32 Status + Strategy (top-right) ── */
+    .top-right { display: flex; gap: 16px; align-items: stretch; }
+
+    .esp-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 0.78rem;
+    }
+    .esp-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ddd;
+      flex-shrink: 0;
+    }
+    .esp-dot.on { background: #22c55e; }
+    .esp-dot.off { background: #ef4444; }
+    .esp-info { line-height: 1.5; }
+    .esp-state-label { font-weight: 600; color: #1e293b; }
+    .esp-detail { color: #64748b; font-size: 0.72rem; }
+
+    .strategy-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 20px;
+    }
+    .strategy-color {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      transition: background-color 0.5s ease, box-shadow 0.5s ease;
+    }
+    .strategy-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #1e293b;
+      text-transform: capitalize;
+    }
+    .strategy-meta { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+    .strategy-meta span { margin-right: 12px; }
+
+    /* ── Flow ── */
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .flow-step {
+      padding: 8px 24px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #64748b;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      transition: all 0.4s ease;
+    }
+    .flow-step.active {
+      color: #0369a1;
+      background: #e0f2fe;
+      border-color: #7dd3fc;
+    }
+    .flow-arrow { color: #94a3b8; font-size: 0.75rem; }
+    .flow-arrow.active { color: #0ea5e9; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 24px; }
+    .section-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #64748b;
+      margin-bottom: 12px;
+    }
+
+    /* ── Two-col top ── */
+    .row-top {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .ai-reason {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 20px 24px;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: #475569;
+      border-left: 3px solid #0ea5e9;
+      display: flex;
+      align-items: center;
+    }
+
+    /* ── Metrics (2x2) ── */
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: #e2e8f0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .metric {
+      background: #fff;
+      padding: 18px 22px;
+    }
+    .metric-value {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 2px;
+    }
+    .metric-label {
+      font-size: 0.68rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Chart ── */
+    .chart-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .chart-wrap canvas { max-height: 220px; }
+
+    /* ── Bottom 3 columns ── */
+    .row-bottom {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 24px;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 16px 20px 12px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #64748b;
+    }
+    .table-scroll {
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #fff;
+      color: #64748b;
+      font-weight: 500;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 14px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid #f0f0f2;
+      color: #475569;
+    }
+    td:first-child { color: #94a3b8; }
+    td strong { color: #1e293b; font-weight: 500; }
+    .color-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    /* ── Log Panels (shared styles) ── */
+    .log-wrap {
+      background: #fafbfc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .log-scroll {
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 0 14px 14px;
+      font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.7rem;
+    }
+    .log-entry {
+      padding: 4px 0;
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+    }
+    .log-entry + .log-entry { border-top: 1px solid #f0f0f2; }
+    .log-time { color: #94a3b8; white-space: nowrap; }
+    .log-badge {
+      font-size: 0.6rem;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    /* Server log badges */
+    .log-badge.trial_received { background: #dcfce7; color: #16a34a; }
+    .log-badge.gemini_request { background: #dbeafe; color: #2563eb; }
+    .log-badge.gemini_response { background: #ede9fe; color: #7c3aed; }
+    .log-badge.gemini_error { background: #fee2e2; color: #dc2626; }
+    .log-badge.server_start { background: #ecfccb; color: #65a30d; }
+    .log-badge.esp_connected { background: #dcfce7; color: #16a34a; }
+    .log-badge.esp_disconnected { background: #fee2e2; color: #dc2626; }
+    .log-badge.esp_idle_on { background: #fef3c7; color: #d97706; }
+    .log-badge.esp_idle_off { background: #dcfce7; color: #16a34a; }
+    .log-badge.esp_person_detected { background: #dbeafe; color: #2563eb; }
+    .log-badge.esp_calibrated { background: #ede9fe; color: #7c3aed; }
+    /* ESP serial log level badges */
+    .log-badge.esp-I { background: #f0f0f2; color: #666; }
+    .log-badge.esp-W { background: #fef3c7; color: #d97706; }
+    .log-badge.esp-E { background: #fee2e2; color: #dc2626; }
+    .log-tag { color: #0ea5e9; font-weight: 500; }
+    .log-msg { color: #64748b; word-break: break-word; }
+
+    .density-badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .density-badge.low { background: #fee2e2; color: #dc2626; }
+    .density-badge.medium { background: #fef3c7; color: #d97706; }
+    .density-badge.high { background: #dcfce7; color: #16a34a; }
+
+    .empty {
+      text-align: center;
+      padding: 32px;
+      color: #94a3b8;
+      font-size: 0.85rem;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+    @media (max-width: 1000px) {
+      .container { padding: 24px 20px; }
+      .top-bar { flex-direction: column; gap: 16px; }
+      .top-right { flex-direction: column; }
+      .row-top { grid-template-columns: 1fr; }
+      .row-bottom { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Top bar: title left, ESP status + strategy right -->
+  <div class="top-bar">
+    <div class="header">
+      <h1>CogniDisplay</h1>
+      <p>AI-Powered Display A/B Testing</p>
+    </div>
+    <div class="top-right">
+      <!-- ESP32 live status -->
+      <div class="esp-status">
+        <div class="esp-dot" id="esp-dot"></div>
+        <div class="esp-info">
+          <div class="esp-state-label" id="esp-state">Disconnected</div>
+          <div class="esp-detail" id="esp-detail">-</div>
+        </div>
+      </div>
+      <!-- Current strategy -->
+      <div class="strategy-card">
+        <div class="strategy-color" id="strategy-color"></div>
+        <div>
+          <div class="strategy-name" id="strat-anim">Waiting...</div>
+          <div class="strategy-meta">
+            <span id="strat-rgb">-</span>
+            <span>Speed: <strong id="strat-speed">-</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Flow -->
+  <div class="flow section">
+    <div class="flow-step" id="flow-observe">Observe</div>
+    <div class="flow-arrow" id="arrow-1">&rarr;</div>
+    <div class="flow-step" id="flow-analyze">Analyze</div>
+    <div class="flow-arrow" id="arrow-2">&rarr;</div>
+    <div class="flow-step" id="flow-act">Act</div>
+  </div>
+
+  <!-- AI Reason + Metrics -->
+  <div class="section row-top">
+    <div>
+      <div class="section-title">AI Reasoning</div>
+      <div class="ai-reason" id="ai-reason">Waiting for first trial...</div>
+    </div>
+    <div>
+      <div class="section-title">Statistics</div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-value" id="stat-total">0</div>
+          <div class="metric-label">Trials</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-avg">&mdash;</div>
+          <div class="metric-label">Avg Dwell</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-best">&mdash;</div>
+          <div class="metric-label">Best Dwell</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-best-anim">&mdash;</div>
+          <div class="metric-label">Best Animation</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-density">&mdash;</div>
+          <div class="metric-label">Density</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-people">&mdash;</div>
+          <div class="metric-label">People / 2min</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="section">
+    <div class="section-title">Dwell Time Trend</div>
+    <div class="chart-wrap">
+      <canvas id="dwellChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Bottom: Trial History | ESP32 Logs | Server Logs -->
+  <div class="section row-bottom">
+    <div class="table-wrap">
+      <div class="panel-header">Trial History</div>
+      <div class="table-scroll" id="trial-body">
+        <div class="empty">No trials yet</div>
+      </div>
+    </div>
+    <div class="log-wrap">
+      <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center;">
+        ESP32 Serial
+        <button id="raw-toggle" onclick="toggleRawMode()" style="font-size:0.6rem;padding:3px 8px;border-radius:4px;border:1px solid #cbd5e1;background:#f1f5f9;color:#64748b;cursor:pointer;font-weight:500;">Show Raw</button>
+      </div>
+      <div class="log-scroll" id="esp-log-body">
+        <div class="empty">No serial data</div>
+      </div>
+    </div>
+    <div class="log-wrap">
+      <div class="panel-header">Server Logs</div>
+      <div class="log-scroll" id="server-log-body">
+        <div class="empty">No logs yet</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const chart = new Chart(document.getElementById('dwellChart'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      borderColor: '#0ea5e9',
+      backgroundColor: 'rgba(14,165,233,0.06)',
+      fill: true,
+      tension: 0.35,
+      pointRadius: 4,
+      pointBackgroundColor: [],
+      borderWidth: 2,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#fff',
+        titleColor: '#111',
+        bodyColor: '#666',
+        borderColor: '#e2e4e9',
+        borderWidth: 1,
+        callbacks: {
+          title: ctx => `Trial ${ctx[0].label}`,
+          label: ctx => {
+            const t = window._trials?.[ctx.dataIndex];
+            const sec = (ctx.parsed.y / 1000).toFixed(1);
+            return [`${sec}s dwell`, t ? `${t.strategy?.animation} | noise ${t.noise_level?.toFixed(0)}` : ''];
+          }
+        }
+      }
+    },
+    scales: {
+      x: { display: false },
+      y: {
+        ticks: { color: '#94a3b8', callback: v => (v/1000).toFixed(0) + 's' },
+        grid: { color: '#f0f0f2', drawBorder: false },
+        border: { display: false }
+      }
+    }
+  }
+});
+
+const ANIM_COLORS = {
+  solid: '#ef4444', breathing: '#3b82f6', rainbow_cycle: '#f97316',
+  blink: '#eab308', wave: '#8b5cf6', color_wipe: '#22c55e'
+};
+
+const STATE_LABELS = {
+  IDLE: 'Idle',
+  PERSON_DETECTED: 'Person Detected',
+  PERSON_LEFT: 'Person Left',
+  IDLE_MODE: 'Idle Mode (Red LED)',
+  UNKNOWN: 'Starting...'
+};
+
+let prevTotal = 0;
+
+function fmtMs(ms) {
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+/* ── Update server status data ── */
+function updateStatus(d) {
+  const s = d.current_strategy;
+  if (s) {
+    const {r=0, g=0, b=0} = s;
+    const el = document.getElementById('strategy-color');
+    el.style.backgroundColor = `rgb(${r},${g},${b})`;
+    el.style.boxShadow = `0 0 20px rgba(${r},${g},${b},0.2)`;
+    document.getElementById('strat-anim').textContent = s.animation || '-';
+    document.getElementById('strat-rgb').textContent = `rgb(${r}, ${g}, ${b})`;
+    document.getElementById('strat-speed').textContent = s.speed ?? '-';
+  }
+
+  if (d.last_reason && d.last_reason !== 'N/A') {
+    document.getElementById('ai-reason').textContent = '"' + d.last_reason + '"';
+  }
+
+  document.getElementById('stat-total').textContent = d.total_trials ?? 0;
+  if (d.stats) {
+    document.getElementById('stat-avg').textContent = fmtMs(d.stats.avg_dwell);
+    document.getElementById('stat-best').textContent = fmtMs(d.stats.max_dwell);
+    document.getElementById('stat-best-anim').textContent = d.stats.best_animation || '-';
+  }
+
+  if (d.last_density) {
+    const ld = d.last_density;
+    const cat = ld.category || 'unknown';
+    document.getElementById('stat-density').innerHTML =
+      ld.score.toFixed(2) + ` <span class="density-badge ${cat}">${cat}</span>`;
+    document.getElementById('stat-people').textContent = ld.person_count_2min ?? 0;
+  }
+
+  const trials = d.trials;
+  if (trials?.length) {
+    window._trials = trials;
+    chart.data.labels = trials.map(t => '#' + t.trial_number);
+    chart.data.datasets[0].data = trials.map(t => t.dwell_time_ms);
+    chart.data.datasets[0].pointBackgroundColor = trials.map(
+      t => ANIM_COLORS[t.strategy?.animation] || '#999'
+    );
+    chart.update('none');
+  }
+
+  if (trials?.length) {
+    const rev = [...trials].reverse();
+    let h = '<table><thead><tr><th>#</th><th>Dwell</th><th>Animation</th><th>Noise</th><th>Density</th></tr></thead><tbody>';
+    for (const t of rev) {
+      const {r=80, g=80, b=80} = t.strategy || {};
+      h += `<tr>
+        <td>${t.trial_number}</td>
+        <td><strong>${fmtMs(t.dwell_time_ms)}</strong></td>
+        <td><span class="color-dot" style="background:rgb(${r},${g},${b})"></span>${t.strategy?.animation || '-'}</td>
+        <td>${t.noise_level?.toFixed(0) ?? '-'}</td>
+        <td>${t.density_category || '-'}</td>
+      </tr>`;
+    }
+    document.getElementById('trial-body').innerHTML = h + '</tbody></table>';
+  }
+
+  if (d.total_trials > prevTotal) {
+    pulseFlow();
+    prevTotal = d.total_trials;
+  }
+}
+
+/* ── Update ESP32 live state + serial logs ── */
+function updateSerial(data) {
+  const st = data.esp_state;
+  const dot = document.getElementById('esp-dot');
+  const stateEl = document.getElementById('esp-state');
+  const detailEl = document.getElementById('esp-detail');
+
+  if (st.connected) {
+    dot.className = 'esp-dot on';
+    stateEl.textContent = STATE_LABELS[st.state] || st.state;
+    const parts = [];
+    if (st.distance != null) parts.push(`${st.distance.toFixed(1)} cm`);
+    if (st.baseline != null) parts.push(`baseline ${st.baseline.toFixed(0)}`);
+    detailEl.textContent = parts.join(' / ') || '-';
+
+    // When ESP32 is in idle mode, override strategy card to show actual LED state
+    if (st.state === 'IDLE_MODE') {
+      document.getElementById('strategy-color').style.backgroundColor = 'rgb(255,255,255)';
+      document.getElementById('strategy-color').style.boxShadow = '0 0 20px rgba(255,255,255,0.3)';
+      document.getElementById('strat-anim').textContent = 'solid (idle)';
+      document.getElementById('strat-rgb').textContent = 'rgb(255, 255, 255)';
+      document.getElementById('strat-speed').textContent = '-';
+    }
+  } else {
+    dot.className = 'esp-dot off';
+    stateEl.textContent = 'Disconnected';
+    detailEl.textContent = 'No serial connection';
+  }
+
+  // ESP serial logs are rendered separately by renderEspLogs()
+}
+
+/* ── Update server logs ── */
+function updateServerLogs(logs) {
+  if (!logs?.length) return;
+  let h = '';
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const l = logs[i];
+    h += `<div class="log-entry">
+      <span class="log-time">${l.timestamp?.substring(11) || ''}</span>
+      <span class="log-badge ${l.type || ''}">${l.type || 'info'}</span>
+      <span class="log-msg">${escHtml(l.message || '')}</span>
+    </div>`;
+  }
+  document.getElementById('server-log-body').innerHTML = h;
+}
+
+/* ── Continuous flow cycle ── */
+const flowIds = ['flow-observe', 'flow-analyze', 'flow-act'];
+const flowArrows = ['arrow-1', 'arrow-2'];
+const flowAll = [...flowIds, ...flowArrows];
+
+function cycleFlow() {
+  flowAll.forEach(id => document.getElementById(id).classList.remove('active'));
+  // Step 1: Observe
+  document.getElementById(flowIds[0]).classList.add('active');
+  setTimeout(() => {
+    // Step 2: Analyze
+    document.getElementById(flowArrows[0]).classList.add('active');
+    document.getElementById(flowIds[1]).classList.add('active');
+  }, 800);
+  setTimeout(() => {
+    // Step 3: Act
+    document.getElementById(flowArrows[1]).classList.add('active');
+    document.getElementById(flowIds[2]).classList.add('active');
+  }, 1600);
+  setTimeout(() => {
+    // Clear all before next cycle
+    flowAll.forEach(id => document.getElementById(id).classList.remove('active'));
+  }, 3200);
+}
+
+// Start continuous loop
+cycleFlow();
+setInterval(cycleFlow, 4000);
+
+// Pulse all on new trial
+function pulseFlow() {
+  flowAll.forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.add('active');
+  });
+  setTimeout(() => flowAll.forEach(id => document.getElementById(id).classList.remove('active')), 600);
+}
+
+/* ── Raw log toggle ── */
+let showRawLogs = false;
+
+function toggleRawMode() {
+  showRawLogs = !showRawLogs;
+  const btn = document.getElementById('raw-toggle');
+  btn.textContent = showRawLogs ? 'Show Filtered' : 'Show Raw';
+  btn.style.background = showRawLogs ? '#0ea5e9' : '#f1f5f9';
+  btn.style.color = showRawLogs ? '#fff' : '#64748b';
+  poll(); // Immediately refresh
+}
+
+function renderEspLogs(logs) {
+  if (!logs?.length) return;
+  let h = '';
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const l = logs[i];
+    const time = l.timestamp?.substring(11) || '';
+    h += `<div class="log-entry">
+      <span class="log-time">${time}</span>
+      <span class="log-badge esp-${l.level || 'I'}">${l.level || 'I'}</span>
+      <span class="log-tag">${escHtml(l.tag || '')}</span>
+      <span class="log-msg">${escHtml(l.message || '')}</span>
+    </div>`;
+  }
+  document.getElementById('esp-log-body').innerHTML = h;
+}
+
+/* ── Polling ── */
+async function poll() {
+  try {
+    const fetches = [
+      fetch('/api/status'),
+      fetch('/api/logs'),
+      fetch('/api/serial'),
+    ];
+    // Fetch raw logs only when toggle is active
+    if (showRawLogs) fetches.push(fetch('/api/serial/raw'));
+
+    const responses = await Promise.all(fetches);
+    updateStatus(await responses[0].json());
+    updateServerLogs((await responses[1].json()).logs);
+    const serialData = await responses[2].json();
+    updateSerial(serialData);
+
+    // Render ESP logs: raw or filtered
+    if (showRawLogs && responses[3]) {
+      const rawData = await responses[3].json();
+      renderEspLogs(rawData.logs);
+    } else {
+      renderEspLogs(serialData.logs);
+    }
+  } catch(e) { console.error(e); }
+}
+
+poll();
+setInterval(poll, 3000);
+</script>
+
+</body>
+</html>

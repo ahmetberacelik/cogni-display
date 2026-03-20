@@ -81,6 +81,11 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
     cJSON_AddNumberToObject(strategy, "speed", trial->current_strategy.speed);
     cJSON_AddItemToObject(root, "current_strategy", strategy);
 
+    // Yoğunluk verileri
+    cJSON_AddNumberToObject(root, "density_score", trial->density_score);
+    cJSON_AddStringToObject(root, "density_category", trial->density_category);
+    cJSON_AddNumberToObject(root, "person_count_2min", trial->person_count_2min);
+
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
 
@@ -157,6 +162,12 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
                  led_animation_type_to_str(new_strategy->animation),
                  new_strategy->r, new_strategy->g, new_strategy->b,
                  new_strategy->speed);
+
+        // AI karar açıklamasını logla
+        cJSON *reason = cJSON_GetObjectItem(resp_json, "reason");
+        if (reason && cJSON_IsString(reason)) {
+            ESP_LOGI(TAG, "Gemini aciklamasi: %s", reason->valuestring);
+        }
     } else {
         ESP_LOGE(TAG, "Cevap JSON'da eksik alan var!");
     }

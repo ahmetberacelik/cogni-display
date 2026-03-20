@@ -8,8 +8,9 @@
 static const char *TAG = "ULTRASONIC";
 
 // Ölçüm zaman aşımı (mikrosaniye).
-// Ses 4 metrede gidip dönerse ~23ms sürer. 25ms yeterli bir üst sınır.
-#define TIMEOUT_US 25000
+// Bazı HC-SR04 klonları engel yokken Echo'yu 38ms'e kadar HIGH tutar.
+// 50ms ile güvenli bir üst sınır sağlıyoruz.
+#define TIMEOUT_US 50000
 
 esp_err_t ultrasonic_init(void)
 {
@@ -43,6 +44,24 @@ esp_err_t ultrasonic_init(void)
 
 esp_err_t ultrasonic_measure_cm(float *distance_cm)
 {
+    // 0. Adım: Önceki ölçümden Echo hâlâ HIGH kalmış olabilir.
+    //    Yeni tetikleme yapmadan önce LOW'a düşmesini bekle.
+    int64_t pre_wait = esp_timer_get_time();
+    while (gpio_get_level(PIN_ULTRASONIC_ECHO) == 1) {
+        if ((esp_timer_get_time() - pre_wait) > TIMEOUT_US) {
+            ESP_LOGW(TAG, "Echo pin baslangicta HIGH takilmis, sifirlaniyor...");
+            // Sensörü sıfırlamak için kısa bir trig darbesi gönder
+            gpio_set_level(PIN_ULTRASONIC_TRIG, 1);
+            esp_rom_delay_us(10);
+            gpio_set_level(PIN_ULTRASONIC_TRIG, 0);
+            esp_rom_delay_us(60000);  // 60ms bekle — sensörün tamamen sıfırlanması için
+            return ESP_FAIL;
+        }
+    }
+
+    // Ölçümler arası minimum bekleme (sensörün toparlanması için)
+    esp_rom_delay_us(50);
+
     // 1. Adım: Trig pinine 10 mikrosaniye HIGH sinyali gönder
     //    Bu sensöre "ölç!" komutu veriyor.
     gpio_set_level(PIN_ULTRASONIC_TRIG, 1);
