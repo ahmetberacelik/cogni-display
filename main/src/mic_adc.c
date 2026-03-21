@@ -8,33 +8,33 @@
 
 static const char *TAG = "MIC";
 
-// ADC handle'ları — init'te oluşturulur, read'de kullanılır
+// ADC handles — created in init, used in read
 static adc_oneshot_unit_handle_t adc_handle = NULL;
 static adc_cali_handle_t cali_handle = NULL;
 
-// RMS'in bu değere ulaşması "100" (çok gürültülü) sayılır.
-// Pratikte ortama göre ayarlanması gerekebilir.
+// RMS reaching this value counts as "100" (very noisy).
+// May need adjustment based on the environment.
 #define MAX_RMS_FOR_SCALE 500.0f
 
 esp_err_t mic_adc_init(void)
 {
-    // ADC1 birimini başlat
-    // Neden ADC1? Çünkü ADC2, Wi-Fi açıkken kullanılamaz (ESP32 kısıtlaması).
+    // Initialize ADC1 unit
+    // Why ADC1? Because ADC2 cannot be used while Wi-Fi is active (ESP32 limitation).
     adc_oneshot_unit_init_cfg_t unit_cfg = {
         .unit_id = MIC_ADC_UNIT,
     };
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &adc_handle));
 
-    // Kanalı konfigüre et
-    // Attenuation 12dB = 0V-3.1V aralığını okuyabilir (MAX4466 çıkışı bu aralıkta)
+    // Configure the channel
+    // Attenuation 12dB = can read 0V-3.1V range (MAX4466 output is in this range)
     adc_oneshot_chan_cfg_t chan_cfg = {
         .atten = MIC_ADC_ATTEN,
-        .bitwidth = ADC_BITWIDTH_12,    // 12-bit çözünürlük: 0-4095
+        .bitwidth = ADC_BITWIDTH_12,    // 12-bit resolution: 0-4095
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, MIC_ADC_CHANNEL, &chan_cfg));
 
-    // Kalibrasyon oluştur — ham ADC değerini gerçek voltaja çevirmek için
-    // (Bizim projede ham değer yeterli ama kalibrasyon iyi pratik)
+    // Create calibration — to convert raw ADC values to actual voltage
+    // (Raw values are sufficient for our project, but calibration is good practice)
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = MIC_ADC_UNIT,
         .chan = MIC_ADC_CHANNEL,
@@ -43,11 +43,11 @@ esp_err_t mic_adc_init(void)
     };
     esp_err_t ret = adc_cali_create_scheme_curve_fitting(&cali_cfg, &cali_handle);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "ADC kalibrasyon olusturulamadi, ham degerler kullanilacak");
+        ESP_LOGW(TAG, "ADC calibration failed, raw values will be used");
         cali_handle = NULL;
     }
 
-    ESP_LOGI(TAG, "Mikrofon ADC baslatildi (GPIO%d, ADC1_CH%d)", PIN_MIC_ADC, MIC_ADC_CHANNEL);
+    ESP_LOGI(TAG, "Microphone ADC initialized (GPIO%d, ADC1_CH%d)", PIN_MIC_ADC, MIC_ADC_CHANNEL);
     return ESP_OK;
 }
 
@@ -55,29 +55,29 @@ esp_err_t mic_adc_read_noise_level(float *noise_level)
 {
     int samples[MIC_SAMPLE_COUNT];
 
-    // 1. Adım: Hızlıca 256 adet ADC okuması yap
-    //    Ses dalgasının farklı anlarını yakalıyoruz.
+    // Step 1: Quickly take 256 ADC readings
+    //    Capturing different moments of the sound wave.
     for (int i = 0; i < MIC_SAMPLE_COUNT; i++) {
         esp_err_t ret = adc_oneshot_read(adc_handle, MIC_ADC_CHANNEL, &samples[i]);
         if (ret != ESP_OK) {
-            // Bu okuma başarısız olduysa atla
-            samples[i] = 2048; // Orta nokta (sessizlik) varsay
+            // If this reading failed, skip it
+            samples[i] = 2048; // Assume midpoint (silence)
         }
     }
 
-    // 2. Adım: Ortalamayı hesapla (DC offset)
-    //    Sessizlikte mikrofon çıkışı VCC/2 = ~1.65V = ~2048 ADC değeri.
-    //    Ama tam 2048 olmayabilir, o yüzden gerçek ortalamayı buluyoruz.
+    // Step 2: Calculate the mean (DC offset)
+    //    At silence, mic output is VCC/2 = ~1.65V = ~2048 ADC value.
+    //    But it may not be exactly 2048, so we find the actual mean.
     float sum = 0;
     for (int i = 0; i < MIC_SAMPLE_COUNT; i++) {
         sum += samples[i];
     }
     float mean = sum / MIC_SAMPLE_COUNT;
 
-    // 3. Adım: RMS (Root Mean Square) hesapla
-    //    Her okumanın ortalamadan ne kadar saptığını ölçüyoruz.
-    //    Sessizlikte sapmalar küçük → düşük RMS.
-    //    Gürültüde sapmalar büyük → yüksek RMS.
+    // Step 3: Calculate RMS (Root Mean Square)
+    //    Measures how much each reading deviates from the mean.
+    //    At silence, deviations are small → low RMS.
+    //    With noise, deviations are large → high RMS.
     float sum_sq = 0;
     for (int i = 0; i < MIC_SAMPLE_COUNT; i++) {
         float diff = samples[i] - mean;
@@ -85,7 +85,7 @@ esp_err_t mic_adc_read_noise_level(float *noise_level)
     }
     float rms = sqrtf(sum_sq / MIC_SAMPLE_COUNT);
 
-    // 4. Adım: 0-100 skalasına çevir
+    // Step 4: Convert to 0-100 scale
     float level = (rms / MAX_RMS_FOR_SCALE) * 100.0f;
     if (level > 100.0f) {
         level = 100.0f;

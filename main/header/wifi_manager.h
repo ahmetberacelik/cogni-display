@@ -3,11 +3,11 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 
-// Wi-Fi STA modunda başlat ve bağlantıyı dene.
+// Initialize Wi-Fi in STA mode and attempt connection.
 esp_err_t wifi_manager_init(void);
 
-// Bağlantı kurulana kadar bekle. Timeout süresi geçerse hata döner.
+// Wait until connected. Returns error if timeout expires.
 esp_err_t wifi_manager_wait_connected(TickType_t timeout_ticks);
 
-// Şu an Wi-Fi bağlı mı?
+// Check if Wi-Fi is currently connected.
 bool wifi_manager_is_connected(void);

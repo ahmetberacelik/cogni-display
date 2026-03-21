@@ -30,12 +30,12 @@ def log_event(event_type, message, data=None):
         event_log.pop(0)
     app.logger.info("[%s] %s", event_type, message)
 
-# Trial geçmişinin saklandığı dosya
+# File where trial history is stored
 TRIALS_FILE = os.path.join(os.path.dirname(__file__), "trials.json")
 
 
 def load_trials():
-    """trials.json dosyasından geçmişi oku."""
+    """Load trial history from trials.json."""
     if os.path.exists(TRIALS_FILE):
         with open(TRIALS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -43,13 +43,13 @@ def load_trials():
 
 
 def save_trials(trials):
-    """trials.json dosyasına geçmişi yaz."""
+    """Save trial history to trials.json."""
     with open(TRIALS_FILE, "w", encoding="utf-8") as f:
         json.dump(trials, f, indent=2, ensure_ascii=False)
 
 
 def generate_fallback_strategy():
-    """Gemini çalışmazsa rastgele bir strateji üret (yedek plan)."""
+    """Generate a random fallback strategy if Gemini fails."""
     animations = ["solid", "breathing", "rainbow_cycle", "blink", "wave", "color_wipe"]
     return {
         "animation": random.choice(animations),
@@ -63,24 +63,24 @@ def generate_fallback_strategy():
 # -----------------------------------------------------------------
 # POST /api/trial
 #
-# ESP32 buraya sensör verisini gönderir. Sunucu:
-#   1. Veriyi trials.json'a kaydeder (yoğunluk bilgisi dahil)
-#   2. Gemini'ye sorar
-#   3. Yeni strateji + karar açıklamasını ESP32'ye döner
+# ESP32 sends sensor data here. The server:
+#   1. Saves the data to trials.json (including density info)
+#   2. Queries Gemini
+#   3. Returns the new strategy + reasoning to ESP32
 # -----------------------------------------------------------------
 @app.route("/api/trial", methods=["POST"])
 def receive_trial():
     data = request.get_json()
     if not data:
-        return jsonify({"error": "JSON body bos"}), 400
+        return jsonify({"error": "JSON body is empty"}), 400
 
-    # Gerekli alanları kontrol et
+    # Check required fields
     required = ["dwell_time_ms", "noise_level", "current_strategy"]
     for field in required:
         if field not in data:
-            return jsonify({"error": f"Eksik alan: {field}"}), 400
+            return jsonify({"error": f"Missing field: {field}"}), 400
 
-    # Geçmişi yükle ve yeni trial'ı ekle
+    # Load history and add new trial
     trials = load_trials()
     trial_entry = {
         "trial_number": len(trials) + 1,
@@ -103,7 +103,7 @@ def receive_trial():
                "dwell_time_ms": trial_entry["dwell_time_ms"],
                "noise_level": trial_entry["noise_level"]})
 
-    # Gemini'ye sor, hata olursa fallback kullan
+    # Query Gemini, use fallback if it fails
     log_event("gemini_request", f"Asking Gemini for strategy (trial history: {len(trials)})")
     try:
         result = get_next_strategy(trials)
@@ -113,17 +113,17 @@ def receive_trial():
                   f"Strategy: {new_strategy.get('animation', '?')} — {reason}",
                   {"strategy": new_strategy})
     except Exception as e:
-        app.logger.error("Gemini hatasi: %s — fallback kullaniliyor", e)
+        app.logger.error("Gemini error: %s — using fallback", e)
         log_event("gemini_error", f"Gemini failed: {e} — using fallback")
         new_strategy = generate_fallback_strategy()
         reason = "Fallback: Gemini unavailable"
 
-    # Yeni stratejiyi ve karar açıklamasını trial kaydına ekle ve kaydet
+    # Add new strategy and reasoning to trial record and save
     trials[-1]["ai_reason"] = reason
     trials[-1]["new_strategy"] = new_strategy
     save_trials(trials)
 
-    # ESP32'ye strateji + reason döndür
+    # Return strategy + reason to ESP32
     response = dict(new_strategy)
     response["reason"] = reason
     return jsonify(response)
@@ -132,12 +132,12 @@ def receive_trial():
 # -----------------------------------------------------------------
 # GET /api/status
 #
-# Tarayıcıdan açarak sistemi izleyebilirsin:
-#   - Toplam kaç trial yapılmış
-#   - Son 10 trial'ın detayları (yoğunluk + AI açıklaması dahil)
-#   - Şu anki aktif strateji
-#   - Son AI karar açıklaması
-#   - Son yoğunluk bilgisi
+# Open in a browser to monitor the system:
+#   - Total number of trials
+#   - Details of the last 10 trials (density + AI reasoning included)
+#   - Current active strategy
+#   - Last AI reasoning
+#   - Last density info
 # -----------------------------------------------------------------
 @app.route("/api/status", methods=["GET"])
 def status():
@@ -207,6 +207,6 @@ if __name__ == "__main__":
         serial_reader.on_event = log_event
         serial_reader.start()
         log_event("server_start", "CogniDisplay server started on port 5000")
-    # host="0.0.0.0" -> aynı ağdaki tüm cihazlar erişebilir (ESP32 dahil)
-    # port=5000 -> sunucu bu portta dinler
+    # host="0.0.0.0" -> accessible from all devices on the same network (including ESP32)
+    # port=5000 -> server listens on this port
     app.run(host="0.0.0.0", port=5000, debug=True)

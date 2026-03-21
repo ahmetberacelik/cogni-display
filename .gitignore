@@ -71,10 +71,10 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# API anahtarları ve gizli bilgiler
+# API keys and secrets
 .env
 
-# Trial geçmişi (çalışma zamanında oluşturulur)
+# Trial history (generated at runtime)
 server/trials.json
 
 # User-specific configuration files

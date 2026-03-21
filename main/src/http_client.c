@@ -12,37 +12,37 @@
 static const char *TAG = "HTTP";
 
 // -----------------------------------------------------------------
-// Sunucudan gelen cevabı saklamak için basit bir buffer yapısı.
+// Simple buffer structure to store the server response.
 //
-// HTTP cevabı parça parça gelebilir. Her parça geldiğinde
-// event handler bu buffer'a ekler. Sonunda tamamını okuruz.
+// HTTP responses may arrive in chunks. Each chunk is appended
+// by the event handler. We read the full response at the end.
 // -----------------------------------------------------------------
 typedef struct {
-    char *data;       // Cevap metni
-    int len;          // Mevcut uzunluk
+    char *data;       // Response text
+    int len;          // Current length
 } response_buffer_t;
 
 // -----------------------------------------------------------------
 // HTTP Event Handler
 //
-// esp_http_client olaya dayalı çalışır. Sunucudan veri geldiğinde
-// bu fonksiyon çağrılır ve gelen veriyi buffer'a ekleriz.
+// esp_http_client is event-driven. When data arrives from the
+// server, this function is called to append it to the buffer.
 // -----------------------------------------------------------------
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     response_buffer_t *buf = (response_buffer_t *)evt->user_data;
 
     if (evt->event_id == HTTP_EVENT_ON_DATA) {
-        // Sunucudan bir veri parçası geldi, buffer'a ekle
+        // A chunk of data arrived from the server, append to buffer
         char *new_data = realloc(buf->data, buf->len + evt->data_len + 1);
         if (new_data == NULL) {
-            ESP_LOGE(TAG, "Bellek yetersiz!");
+            ESP_LOGE(TAG, "Out of memory!");
             return ESP_FAIL;
         }
         buf->data = new_data;
         memcpy(buf->data + buf->len, evt->data, evt->data_len);
         buf->len += evt->data_len;
-        buf->data[buf->len] = '\0';  // String sonu işareti
+        buf->data[buf->len] = '\0';  // Null terminator
     }
 
     return ESP_OK;
@@ -51,17 +51,17 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 // -----------------------------------------------------------------
 // http_client_send_trial
 //
-// 1. Trial verisini cJSON ile JSON string'e çevirir
-// 2. HTTP POST ile sunucuya gönderir
-// 3. Sunucunun cevabını (yeni strateji) parse eder
+// 1. Converts trial data to JSON string using cJSON
+// 2. Sends it to the server via HTTP POST
+// 3. Parses the server response (new strategy)
 // -----------------------------------------------------------------
 esp_err_t http_client_send_trial(const trial_data_t *trial,
                                   led_strategy_t *new_strategy)
 {
     esp_err_t ret = ESP_FAIL;
 
-    // ---- 1. JSON oluştur ----
-    // Şu formatı üretiyoruz:
+    // ---- 1. Build JSON ----
+    // Produces the following format:
     // {
     //   "dwell_time_ms": 4500,
     //   "noise_level": 42.3,
@@ -81,7 +81,7 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
     cJSON_AddNumberToObject(strategy, "speed", trial->current_strategy.speed);
     cJSON_AddItemToObject(root, "current_strategy", strategy);
 
-    // Yoğunluk verileri
+    // Density data
     cJSON_AddNumberToObject(root, "density_score", trial->density_score);
     cJSON_AddStringToObject(root, "density_category", trial->density_category);
     cJSON_AddNumberToObject(root, "person_count_2min", trial->person_count_2min);
@@ -90,13 +90,13 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
     cJSON_Delete(root);
 
     if (json_str == NULL) {
-        ESP_LOGE(TAG, "JSON olusturulamadi!");
+        ESP_LOGE(TAG, "Failed to create JSON!");
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Gonderilen JSON: %s", json_str);
+    ESP_LOGI(TAG, "Sent JSON: %s", json_str);
 
-    // ---- 2. HTTP POST gönder ----
+    // ---- 2. Send HTTP POST ----
     response_buffer_t response = { .data = NULL, .len = 0 };
 
     esp_http_client_config_t config = {
@@ -115,32 +115,32 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
     esp_err_t err = esp_http_client_perform(client);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP istegi basarisiz: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
         goto cleanup;
     }
 
     int status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "HTTP cevap kodu: %d", status_code);
+    ESP_LOGI(TAG, "HTTP response code: %d", status_code);
 
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Sunucu hata dondu: %d", status_code);
+        ESP_LOGE(TAG, "Server returned error: %d", status_code);
         goto cleanup;
     }
 
     if (response.data == NULL) {
-        ESP_LOGE(TAG, "Sunucudan cevap gelmedi!");
+        ESP_LOGE(TAG, "No response from server!");
         goto cleanup;
     }
 
-    ESP_LOGI(TAG, "Gelen cevap: %s", response.data);
+    ESP_LOGI(TAG, "Received response: %s", response.data);
 
-    // ---- 3. Cevabı parse et ----
-    // Beklenen format:
+    // ---- 3. Parse response ----
+    // Expected format:
     // {"animation": "rainbow_cycle", "r": 255, "g": 100, "b": 0, "speed": 75}
 
     cJSON *resp_json = cJSON_Parse(response.data);
     if (resp_json == NULL) {
-        ESP_LOGE(TAG, "Cevap JSON parse edilemedi!");
+        ESP_LOGE(TAG, "Failed to parse response JSON!");
         goto cleanup;
     }
 
@@ -158,18 +158,18 @@ esp_err_t http_client_send_trial(const trial_data_t *trial,
         new_strategy->speed = (uint8_t)spd->valueint;
         ret = ESP_OK;
 
-        ESP_LOGI(TAG, "Yeni strateji: %s, RGB(%d,%d,%d), hiz=%d",
+        ESP_LOGI(TAG, "New strategy: %s, RGB(%d,%d,%d), speed=%d",
                  led_animation_type_to_str(new_strategy->animation),
                  new_strategy->r, new_strategy->g, new_strategy->b,
                  new_strategy->speed);
 
-        // AI karar açıklamasını logla
+        // Log the AI reasoning
         cJSON *reason = cJSON_GetObjectItem(resp_json, "reason");
         if (reason && cJSON_IsString(reason)) {
-            ESP_LOGI(TAG, "Gemini aciklamasi: %s", reason->valuestring);
+            ESP_LOGI(TAG, "Gemini reasoning: %s", reason->valuestring);
         }
     } else {
-        ESP_LOGE(TAG, "Cevap JSON'da eksik alan var!");
+        ESP_LOGE(TAG, "Response JSON has missing fields!");
     }
 
     cJSON_Delete(resp_json);

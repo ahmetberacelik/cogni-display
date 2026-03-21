@@ -128,6 +128,6 @@ When changing Wi-Fi networks, update **two things** in `header/config.h`:
 
 ## Hardware Notes
 
-- ESP32 pins don't make reliable contact in cheap breadboards. Use dişi-erkek jumper cables with ESP32 outside the breadboard if pins read incorrectly.
+- ESP32 pins don't make reliable contact in cheap breadboards. Use female-male (F-M) jumper cables with ESP32 outside the breadboard if pins read incorrectly.
 - MAX4466 trim pot adjusts gain (25×-125×). Turn clockwise for higher sensitivity. Target noise level 20-40 during normal speech.
 - HC-SR04 GND must go to GND, not 5V (common wiring mistake).

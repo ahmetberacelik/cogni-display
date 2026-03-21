@@ -16,24 +16,24 @@
 static const char *TAG = "MAIN";
 
 // ============================================================
-//  State Machine — Sistemin üç durumu
+//  State Machine — Three system states
 // ============================================================
 typedef enum {
-    STATE_IDLE,              // Kimse yok, tarama yapılıyor
-    STATE_PERSON_DETECTED,   // Biri var, süre ve gürültü ölçülüyor
-    STATE_PERSON_LEFT,       // Kişi gitti, veri gönderilecek
+    STATE_IDLE,              // No one around, scanning
+    STATE_PERSON_DETECTED,   // Someone present, measuring dwell time and noise
+    STATE_PERSON_LEFT,       // Person left, data will be sent
 } app_state_t;
 
 // ============================================================
-//  Density (Yoğunluk) Takibi — Son 2dk'daki olaylar
+//  Density Tracking — Events within the last 2 minutes
 // ============================================================
 typedef struct {
-    int64_t timestamp_ms;      // Kişi ne zaman ayrıldı
-    uint32_t dwell_time_ms;    // Ne kadar durdu
-    float noise_level;         // O sıradaki ortalama gürültü
+    int64_t timestamp_ms;      // When the person left
+    uint32_t dwell_time_ms;    // How long they stayed
+    float noise_level;         // Average noise at that time
 } density_event_t;
 
-// Yoğunluk hesapla: son 2dk'daki olaylardan skor üret
+// Calculate density: generate a score from events within the last 2 minutes
 static void calculate_density(const density_event_t *events, int event_count,
                               int64_t now_ms,
                               float *out_score, const char **out_category,
@@ -62,7 +62,7 @@ static void calculate_density(const density_event_t *events, int event_count,
 
     *out_avg_dwell = dwell_sum / count;
 
-    // Normalize: kişi sayısı (max 10), dwell (max 30sn), gürültü (max 100)
+    // Normalize: person count (max 10), dwell (max 30s), noise (max 100)
     float person_norm = fminf((float)count / DENSITY_PERSON_MAX, 1.0f);
     float dwell_norm = fminf(*out_avg_dwell / DENSITY_DWELL_MAX_MS, 1.0f);
     float noise_norm = fminf((noise_sum / count) / 100.0f, 1.0f);
@@ -82,13 +82,13 @@ static void calculate_density(const density_event_t *events, int event_count,
 }
 
 // ============================================================
-//  Ana Program
+//  Main Program
 // ============================================================
 void app_main(void)
 {
-    ESP_LOGI(TAG, "CogniDisplay baslatiliyor...");
+    ESP_LOGI(TAG, "CogniDisplay starting...");
 
-    // ---- 1. NVS başlat (Wi-Fi için gerekli) ----
+    // ---- 1. Initialize NVS (required for Wi-Fi) ----
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
@@ -96,29 +96,29 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // ---- 2. Wi-Fi başlat ve bağlan ----
+    // ---- 2. Initialize Wi-Fi and connect ----
     ret = wifi_manager_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Wi-Fi baslatilamadi!");
+        ESP_LOGE(TAG, "Wi-Fi initialization failed!");
         return;
     }
 
-    ESP_LOGI(TAG, "Wi-Fi baglanti bekleniyor (30sn)...");
+    ESP_LOGI(TAG, "Waiting for Wi-Fi connection (30s)...");
     ret = wifi_manager_wait_connected(pdMS_TO_TICKS(30000));
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Wi-Fi baglantisi basarisiz!");
+        ESP_LOGE(TAG, "Wi-Fi connection failed!");
         return;
     }
-    ESP_LOGI(TAG, "Wi-Fi bagli.");
+    ESP_LOGI(TAG, "Wi-Fi connected.");
 
-    // ---- 3. Sensörleri başlat ----
+    // ---- 3. Initialize sensors ----
     ultrasonic_init();
     mic_adc_init();
 
-    // ---- 4. LED animasyonu başlat ----
+    // ---- 4. Start LED animation ----
     led_animation_init();
 
-    // Varsayılan strateji: gökkuşağı döngüsü
+    // Default strategy: rainbow cycle
     led_strategy_t current_strategy = {
         .animation = ANIM_RAINBOW_CYCLE,
         .r = 0, .g = 0, .b = 255,
@@ -126,8 +126,8 @@ void app_main(void)
     };
     led_animation_set_strategy(&current_strategy);
 
-    // ---- 5. Başlangıç Kalibrasyonu ----
-    ESP_LOGI(TAG, "Kalibrasyon basliyor (%d saniye)...", CALIBRATION_DURATION_MS / 1000);
+    // ---- 5. Startup Calibration ----
+    ESP_LOGI(TAG, "Calibration starting (%d seconds)...", CALIBRATION_DURATION_MS / 1000);
 
     float calib_sum = 0;
     int calib_count = 0;
@@ -147,42 +147,42 @@ void app_main(void)
         baseline_cm = calib_sum / calib_count;
     } else {
         baseline_cm = BASELINE_DEFAULT_CM;
-        ESP_LOGW(TAG, "Kalibrasyon basarisiz, varsayilan baseline: %.1f cm", baseline_cm);
+        ESP_LOGW(TAG, "Calibration failed, default baseline: %.1f cm", baseline_cm);
     }
 
     float detect_threshold = baseline_cm * BASELINE_DETECT_RATIO;
     float depart_threshold = baseline_cm * BASELINE_DEPART_RATIO;
 
-    ESP_LOGI(TAG, "Kalibrasyon tamam! Baseline: %.1f cm, Tespit esigi: %.1f cm, Ayrilma esigi: %.1f cm",
+    ESP_LOGI(TAG, "Calibration done! Baseline: %.1f cm, Detect threshold: %.1f cm, Depart threshold: %.1f cm",
              baseline_cm, detect_threshold, depart_threshold);
 
-    // ---- 6. State machine değişkenleri ----
+    // ---- 6. State machine variables ----
     app_state_t state = STATE_IDLE;
     int64_t detect_start_time = 0;
     float noise_sum = 0;
     int noise_count = 0;
     int consecutive_absent = 0;
 
-    // Adaptif baseline takibi
+    // Adaptive baseline tracking
     float baseline_candidate = 0;
     int64_t baseline_stable_since = 0;
     bool baseline_tracking = false;
 
-    // Yoğunluk takibi (circular buffer)
+    // Density tracking (circular buffer)
     density_event_t density_events[DENSITY_MAX_EVENTS];
     memset(density_events, 0, sizeof(density_events));
     int density_event_count = 0;
     int density_event_index = 0;
 
-    // Idle modu
+    // Idle mode
     int64_t last_person_time_ms = esp_timer_get_time() / 1000;
     bool idle_mode_active = false;
 
-    ESP_LOGI(TAG, "Sistem hazir. Tarama basliyor...");
+    ESP_LOGI(TAG, "System ready. Scanning started...");
 
-    // ---- 7. Ana döngü ----
+    // ---- 7. Main loop ----
     while (1) {
-        // Mesafe ölç
+        // Measure distance
         float distance_cm = 999.0f;
         esp_err_t meas_ret = ultrasonic_measure_cm(&distance_cm);
         if (meas_ret != ESP_OK) {
@@ -191,39 +191,39 @@ void app_main(void)
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
-        ESP_LOGI(TAG, "[%s] Mesafe: %.1f cm (baseline: %.1f)",
+        ESP_LOGI(TAG, "[%s] Distance: %.1f cm (baseline: %.1f)",
                  (state == STATE_IDLE) ? "IDLE" :
                  (state == STATE_PERSON_DETECTED) ? "DETECTED" : "LEFT",
                  distance_cm, baseline_cm);
 
         switch (state) {
 
-        // ---- IDLE: Kimse yok, tarama yapılıyor ----
+        // ---- IDLE: No one around, scanning ----
         case STATE_IDLE:
-            // --- Adaptif baseline güncelleme ---
+            // --- Adaptive baseline update ---
             if (distance_cm < 400.0f) {
                 if (!baseline_tracking) {
                     baseline_tracking = true;
                     baseline_candidate = distance_cm;
                     baseline_stable_since = now_ms;
                 } else if (fabsf(distance_cm - baseline_candidate) < BASELINE_UPDATE_TOLERANCE_CM) {
-                    // Hâlâ stabil — 60sn geçti mi?
+                    // Still stable — has 60s passed?
                     if ((now_ms - baseline_stable_since) > BASELINE_UPDATE_TIMEOUT_MS) {
                         baseline_cm = baseline_candidate;
                         detect_threshold = baseline_cm * BASELINE_DETECT_RATIO;
                         depart_threshold = baseline_cm * BASELINE_DEPART_RATIO;
                         baseline_tracking = false;
-                        ESP_LOGI(TAG, "Baseline guncellendi: %.1f cm (tespit: %.1f, ayrilma: %.1f)",
+                        ESP_LOGI(TAG, "Baseline updated: %.1f cm (detect: %.1f, depart: %.1f)",
                                  baseline_cm, detect_threshold, depart_threshold);
                     }
                 } else {
-                    // Mesafe değişti, takibi sıfırla
+                    // Distance changed, reset tracking
                     baseline_candidate = distance_cm;
                     baseline_stable_since = now_ms;
                 }
             }
 
-            // --- Kişi tespiti (dinamik eşik) ---
+            // --- Person detection (dynamic threshold) ---
             if (distance_cm < detect_threshold) {
                 state = STATE_PERSON_DETECTED;
                 detect_start_time = esp_timer_get_time();
@@ -233,18 +233,18 @@ void app_main(void)
                 last_person_time_ms = now_ms;
                 baseline_tracking = false;
 
-                // Idle moddan çık
+                // Exit idle mode
                 if (idle_mode_active) {
                     idle_mode_active = false;
                     led_animation_set_strategy(&current_strategy);
-                    ESP_LOGI(TAG, "Idle mod kapandi, normal moda donuluyor.");
+                    ESP_LOGI(TAG, "Idle mode off, returning to normal mode.");
                 }
 
-                ESP_LOGI(TAG, "Kisi tespit edildi! Mesafe: %.1f cm (esik: %.1f)",
+                ESP_LOGI(TAG, "Person detected! Distance: %.1f cm (threshold: %.1f)",
                          distance_cm, detect_threshold);
             }
 
-            // --- Idle timeout kontrolü ---
+            // --- Idle timeout check ---
             if (!idle_mode_active && (now_ms - last_person_time_ms) > IDLE_TIMEOUT_MS) {
                 idle_mode_active = true;
                 led_strategy_t idle_strategy = {
@@ -253,13 +253,13 @@ void app_main(void)
                     .speed = 50,
                 };
                 led_animation_set_strategy(&idle_strategy);
-                ESP_LOGW(TAG, "2 dakika boyunca kimse gelmedi. Idle mod: beyaz sabit.");
+                ESP_LOGW(TAG, "No one for 2 minutes. Idle mode: solid white.");
             }
             break;
 
-        // ---- PERSON_DETECTED: Biri var, ölçüm yapılıyor ----
+        // ---- PERSON_DETECTED: Someone present, measuring ----
         case STATE_PERSON_DETECTED:
-            // Gürültü ölçümü biriktir
+            // Accumulate noise measurements
             {
                 float noise = 0;
                 if (mic_adc_read_noise_level(&noise) == ESP_OK) {
@@ -268,40 +268,40 @@ void app_main(void)
                 }
             }
 
-            // Kişi hâlâ burada mı? (dinamik eşik)
+            // Is the person still here? (dynamic threshold)
             if (distance_cm > depart_threshold) {
                 consecutive_absent++;
                 if (consecutive_absent >= PERSON_LEFT_CONFIRM_COUNT) {
                     state = STATE_PERSON_LEFT;
-                    ESP_LOGI(TAG, "Kisi ayrildi.");
+                    ESP_LOGI(TAG, "Person left.");
                 }
             } else {
                 consecutive_absent = 0;
             }
             break;
 
-        // ---- PERSON_LEFT: Veri gönder, yeni strateji al ----
+        // ---- PERSON_LEFT: Send data, get new strategy ----
         case STATE_PERSON_LEFT:
             {
-                // Dwell time hesapla
+                // Calculate dwell time
                 int64_t now_us = esp_timer_get_time();
                 uint32_t dwell_time_ms = (uint32_t)((now_us - detect_start_time) / 1000);
 
-                // Ortalama gürültü
+                // Average noise
                 float avg_noise = (noise_count > 0) ? (noise_sum / noise_count) : 0;
 
-                ESP_LOGI(TAG, "Dwell time: %lu ms, Ortalama gurultu: %.1f",
+                ESP_LOGI(TAG, "Dwell time: %lu ms, Average noise: %.1f",
                          (unsigned long)dwell_time_ms, avg_noise);
 
-                // Çok kısa süreli tespitleri yoksay
+                // Ignore very short detections
                 if (dwell_time_ms < MIN_DWELL_TIME_MS) {
-                    ESP_LOGW(TAG, "Cok kisa sure (%lu ms), yoksayiliyor.",
+                    ESP_LOGW(TAG, "Too short (%lu ms), ignoring.",
                              (unsigned long)dwell_time_ms);
                     state = STATE_IDLE;
                     break;
                 }
 
-                // Olayı density buffer'a kaydet
+                // Record event in density buffer
                 density_events[density_event_index] = (density_event_t){
                     .timestamp_ms = now_ms,
                     .dwell_time_ms = dwell_time_ms,
@@ -312,7 +312,7 @@ void app_main(void)
                     density_event_count++;
                 }
 
-                // Yoğunluk hesapla
+                // Calculate density
                 float density_score = 0;
                 const char *density_category = "low";
                 int person_count_2min = 0;
@@ -321,12 +321,12 @@ void app_main(void)
                                   &density_score, &density_category,
                                   &person_count_2min, &avg_dwell);
 
-                ESP_LOGI(TAG, "Yogunluk: %.2f (%s), Son 2dk kisi: %d, Ort dwell: %.0f ms",
+                ESP_LOGI(TAG, "Density: %.2f (%s), Last 2min people: %d, Avg dwell: %.0f ms",
                          density_score, density_category, person_count_2min, avg_dwell);
 
                 last_person_time_ms = now_ms;
 
-                // Sunucuya gönder
+                // Send to server
                 if (wifi_manager_is_connected()) {
                     trial_data_t trial = {
                         .dwell_time_ms = dwell_time_ms,
@@ -344,13 +344,13 @@ void app_main(void)
                     if (ret == ESP_OK) {
                         current_strategy = new_strategy;
                         led_animation_set_strategy(&current_strategy);
-                        ESP_LOGI(TAG, "Yeni strateji uygulandi: %s",
+                        ESP_LOGI(TAG, "New strategy applied: %s",
                                  led_animation_type_to_str(current_strategy.animation));
                     } else {
-                        ESP_LOGW(TAG, "Sunucu hatasi, mevcut strateji korunuyor.");
+                        ESP_LOGW(TAG, "Server error, keeping current strategy.");
                     }
                 } else {
-                    ESP_LOGW(TAG, "Wi-Fi bagli degil, veri gonderilemedi.");
+                    ESP_LOGW(TAG, "Wi-Fi not connected, data not sent.");
                 }
 
                 state = STATE_IDLE;
@@ -358,7 +358,7 @@ void app_main(void)
             break;
         }
 
-        // 100ms bekle (saniyede 10 tarama)
+        // Wait 100ms (10 scans per second)
         vTaskDelay(pdMS_TO_TICKS(ULTRASONIC_SCAN_INTERVAL_MS));
     }
 }

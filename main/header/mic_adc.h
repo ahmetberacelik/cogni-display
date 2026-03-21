@@ -2,9 +2,9 @@
 
 #include "esp_err.h"
 
-// ADC donanımını konfigüre eder ve kalibrasyonu yapar.
+// Configure ADC hardware and perform calibration.
 esp_err_t mic_adc_init(void);
 
-// Ortam gürültü seviyesini ölçer (0.0 = sessiz, 100.0 = çok gürültülü).
-// 256 adet hızlı okuma yapıp RMS hesabıyla sonuç üretir.
+// Measure ambient noise level (0.0 = silent, 100.0 = very noisy).
+// Takes 256 fast readings and produces a result via RMS calculation.
 esp_err_t mic_adc_read_noise_level(float *noise_level);

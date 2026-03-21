@@ -48,23 +48,23 @@ class SerialReader:
         # I (12345) TAG: message
         self._re_log = re.compile(r'^([IWE]) \((\d+)\) (\w+): (.*)$')
 
-        # Main loop: [STATE] Mesafe: X cm (baseline: Y)
+        # Main loop: [STATE] Distance: X cm (baseline: Y)
         # Firmware prints IDLE, DETECTED, LEFT (not PERSON_DETECTED etc.)
         self._re_state = re.compile(
-            r'\[(IDLE|DETECTED|LEFT)\] Mesafe: ([\d.]+) cm \(baseline: ([\d.]+)\)'
+            r'\[(IDLE|DETECTED|LEFT)\] Distance: ([\d.]+) cm \(baseline: ([\d.]+)\)'
         )
         # Person detected
-        self._re_detect = re.compile(r'Kisi tespit edildi! Mesafe: ([\d.]+) cm')
+        self._re_detect = re.compile(r'Person detected! Distance: ([\d.]+) cm')
         # Dwell time + noise
-        self._re_dwell = re.compile(r'Dwell time: (\d+) ms, Ortalama gurultu: ([\d.]+)')
+        self._re_dwell = re.compile(r'Dwell time: (\d+) ms, Average noise: ([\d.]+)')
         # Density
         self._re_density = re.compile(
-            r'Yogunluk: ([\d.]+) \((\w+)\), Son 2dk kisi: (\d+)'
+            r'Density: ([\d.]+) \((\w+)\), Last 2min people: (\d+)'
         )
         # Calibration done
-        self._re_calib = re.compile(r'Kalibrasyon tamam! Baseline: ([\d.]+) cm')
+        self._re_calib = re.compile(r'Calibration done! Baseline: ([\d.]+) cm')
         # Baseline update
-        self._re_baseline = re.compile(r'Baseline guncellendi: ([\d.]+) cm')
+        self._re_baseline = re.compile(r'Baseline updated: ([\d.]+) cm')
 
     def start(self):
         if self._running:
@@ -183,21 +183,21 @@ class SerialReader:
                 self.esp_state["distance"] = float(m.group(2))
                 self.esp_state["baseline"] = float(m.group(3))
                 # Don't overwrite IDLE_MODE with regular IDLE updates.
-                # idle_mode is only cleared by "Idle mod kapandi" message.
+                # idle_mode is only cleared by "Idle mode off" message.
                 if not (self.esp_state["idle_mode"] and raw_state == "IDLE"):
                     self.esp_state["state"] = mapped
             return
 
         # Idle mode ON
-        if "Idle mod: kirmizi sabit" in msg:
+        if "Idle mode: solid white" in msg:
             with self._lock:
                 self.esp_state["idle_mode"] = True
                 self.esp_state["state"] = "IDLE_MODE"
-            self._emit("esp_idle_on", "ESP32 entered idle mode (solid red LED)")
+            self._emit("esp_idle_on", "ESP32 entered idle mode (solid white LED)")
             return
 
         # Idle mode OFF
-        if "Idle mod kapandi" in msg:
+        if "Idle mode off" in msg:
             with self._lock:
                 self.esp_state["idle_mode"] = False
                 self.esp_state["state"] = "IDLE"
@@ -245,13 +245,13 @@ class SerialReader:
             return
 
         # Wi-Fi connected
-        if "Wi-Fi bagli." in msg or "Baglanti basarili" in msg:
+        if "Wi-Fi connected." in msg or "Connection successful" in msg:
             with self._lock:
                 self.esp_state["wifi_connected"] = True
             return
 
         # Wi-Fi disconnected
-        if "Baglanti koptu" in msg or "Wi-Fi baglantisi basarisiz" in msg:
+        if "Connection lost" in msg or "Wi-Fi connection failed" in msg:
             with self._lock:
                 self.esp_state["wifi_connected"] = False
             return

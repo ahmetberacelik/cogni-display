@@ -2,10 +2,10 @@
 
 #include "esp_err.h"
 
-// Trig ve Echo GPIO pinlerini konfigüre eder.
+// Configure Trig and Echo GPIO pins.
 esp_err_t ultrasonic_init(void);
 
-// Tek bir mesafe ölçümü yapar.
-// Başarılı olursa distance_cm'e sonucu yazar ve ESP_OK döner.
-// Timeout veya hata durumunda ESP_FAIL döner.
+// Perform a single distance measurement.
+// On success, writes the result to distance_cm and returns ESP_OK.
+// On timeout or error, returns ESP_FAIL.
 esp_err_t ultrasonic_measure_cm(float *distance_cm);

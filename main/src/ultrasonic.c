@@ -7,14 +7,14 @@
 
 static const char *TAG = "ULTRASONIC";
 
-// Ölçüm zaman aşımı (mikrosaniye).
-// Bazı HC-SR04 klonları engel yokken Echo'yu 38ms'e kadar HIGH tutar.
-// 50ms ile güvenli bir üst sınır sağlıyoruz.
+// Measurement timeout (microseconds).
+// Some HC-SR04 clones keep Echo HIGH for up to 38ms when no obstacle is present.
+// 50ms provides a safe upper limit.
 #define TIMEOUT_US 50000
 
 esp_err_t ultrasonic_init(void)
 {
-    // Trig pini: biz sinyal göndereceğiz → Output
+    // Trig pin: we send signals → Output
     gpio_config_t trig_conf = {
         .pin_bit_mask = (1ULL << PIN_ULTRASONIC_TRIG),
         .mode = GPIO_MODE_OUTPUT,
@@ -24,7 +24,7 @@ esp_err_t ultrasonic_init(void)
     };
     gpio_config(&trig_conf);
 
-    // Echo pini: sensörden sinyal alacağız → Input
+    // Echo pin: we receive signals from the sensor → Input
     gpio_config_t echo_conf = {
         .pin_bit_mask = (1ULL << PIN_ULTRASONIC_ECHO),
         .mode = GPIO_MODE_INPUT,
@@ -34,72 +34,72 @@ esp_err_t ultrasonic_init(void)
     };
     gpio_config(&echo_conf);
 
-    // Trig pinini LOW'da başlat
+    // Start Trig pin at LOW
     gpio_set_level(PIN_ULTRASONIC_TRIG, 0);
 
-    ESP_LOGI(TAG, "Ultrasonik sensör baslatildi (Trig: GPIO%d, Echo: GPIO%d)",
+    ESP_LOGI(TAG, "Ultrasonic sensor initialized (Trig: GPIO%d, Echo: GPIO%d)",
              PIN_ULTRASONIC_TRIG, PIN_ULTRASONIC_ECHO);
     return ESP_OK;
 }
 
 esp_err_t ultrasonic_measure_cm(float *distance_cm)
 {
-    // 0. Adım: Önceki ölçümden Echo hâlâ HIGH kalmış olabilir.
-    //    Yeni tetikleme yapmadan önce LOW'a düşmesini bekle.
+    // Step 0: Echo may still be HIGH from the previous measurement.
+    //    Wait for it to go LOW before triggering a new one.
     int64_t pre_wait = esp_timer_get_time();
     while (gpio_get_level(PIN_ULTRASONIC_ECHO) == 1) {
         if ((esp_timer_get_time() - pre_wait) > TIMEOUT_US) {
-            ESP_LOGW(TAG, "Echo pin baslangicta HIGH takilmis, sifirlaniyor...");
-            // Sensörü sıfırlamak için kısa bir trig darbesi gönder
+            ESP_LOGW(TAG, "Echo pin stuck HIGH at start, resetting...");
+            // Send a short trig pulse to reset the sensor
             gpio_set_level(PIN_ULTRASONIC_TRIG, 1);
             esp_rom_delay_us(10);
             gpio_set_level(PIN_ULTRASONIC_TRIG, 0);
-            esp_rom_delay_us(60000);  // 60ms bekle — sensörün tamamen sıfırlanması için
+            esp_rom_delay_us(60000);  // Wait 60ms for full sensor reset
             return ESP_FAIL;
         }
     }
 
-    // Ölçümler arası minimum bekleme (sensörün toparlanması için)
+    // Minimum wait between measurements (for sensor recovery)
     esp_rom_delay_us(50);
 
-    // 1. Adım: Trig pinine 10 mikrosaniye HIGH sinyali gönder
-    //    Bu sensöre "ölç!" komutu veriyor.
+    // Step 1: Send a 10 microsecond HIGH signal to the Trig pin
+    //    This tells the sensor to start measuring.
     gpio_set_level(PIN_ULTRASONIC_TRIG, 1);
     esp_rom_delay_us(10);
     gpio_set_level(PIN_ULTRASONIC_TRIG, 0);
 
-    // 2. Adım: Echo pininin HIGH olmasını bekle
-    //    Sensör ses dalgasını yayıyor, Echo henüz LOW.
+    // Step 2: Wait for Echo pin to go HIGH
+    //    The sensor is emitting the sound wave, Echo is still LOW.
     int64_t start_wait = esp_timer_get_time();
     while (gpio_get_level(PIN_ULTRASONIC_ECHO) == 0) {
         if ((esp_timer_get_time() - start_wait) > TIMEOUT_US) {
-            ESP_LOGW(TAG, "Timeout: Echo HIGH olmadi");
+            ESP_LOGW(TAG, "Timeout: Echo did not go HIGH");
             return ESP_FAIL;
         }
     }
 
-    // 3. Adım: Echo HIGH oldu! Zamanı kaydet.
-    //    Ses dalgası yola çıktı.
+    // Step 3: Echo went HIGH! Record the time.
+    //    The sound wave has been sent.
     int64_t echo_start = esp_timer_get_time();
 
-    // 4. Adım: Echo pininin LOW olmasını bekle
-    //    Ses dalgası engele çarpıp geri döndüğünde Echo LOW olacak.
+    // Step 4: Wait for Echo pin to go LOW
+    //    Echo goes LOW when the sound wave bounces back from an obstacle.
     while (gpio_get_level(PIN_ULTRASONIC_ECHO) == 1) {
         if ((esp_timer_get_time() - echo_start) > TIMEOUT_US) {
-            ESP_LOGW(TAG, "Timeout: Echo LOW olmadi (engel yok veya cok uzak)");
+            ESP_LOGW(TAG, "Timeout: Echo did not go LOW (no obstacle or too far)");
             return ESP_FAIL;
         }
     }
 
-    // 5. Adım: Süreyi hesapla ve cm'ye çevir
-    //    Ses gidip geldi. Toplam süreyi 58'e bölünce mesafe cm olarak çıkar.
+    // Step 5: Calculate duration and convert to cm
+    //    Sound traveled round-trip. Dividing total time by 58 gives distance in cm.
     int64_t echo_end = esp_timer_get_time();
     int64_t duration_us = echo_end - echo_start;
     float distance = (float)duration_us / 58.0f;
 
-    // Geçersiz aralık kontrolü (HC-SR04: 2cm - 400cm arası güvenilir)
+    // Invalid range check (HC-SR04: reliable between 2cm - 400cm)
     if (distance < 2.0f || distance > 400.0f) {
-        ESP_LOGW(TAG, "Gecersiz mesafe: %.1f cm (aralik disi)", distance);
+        ESP_LOGW(TAG, "Invalid distance: %.1f cm (out of range)", distance);
         return ESP_FAIL;
     }
 

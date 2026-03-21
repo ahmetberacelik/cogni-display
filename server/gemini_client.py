@@ -4,16 +4,16 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# .env dosyasından API anahtarını yükle
+# Load API key from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # -----------------------------------------------------------------
-# Gemini'ye verdiğimiz rol tanımı (System Prompt)
+# System Prompt — Role definition for Gemini
 #
-# Gemini'ye "Sen bir pazarlama uzmanısın" diyoruz ve kuralları
-# belirliyoruz: hangi animasyonlar var, ne döndürmeli, nasıl
-# düşünmeli. Yoğunluk verisini ve karar açıklamasını da istiyoruz.
+# We tell Gemini "You are a marketing expert" and define the rules:
+# available animations, expected output format, decision-making
+# guidelines. We also request density data and reasoning.
 # -----------------------------------------------------------------
 SYSTEM_PROMPT = """You are a Marketing Display Expert AI that optimizes physical storefront LED displays through A/B testing.
 
@@ -56,10 +56,10 @@ Respond with ONLY a valid JSON object:
 
 def get_next_strategy(trials):
     """
-    Trial geçmişini Gemini'ye gönder, yeni strateji al.
+    Send trial history to Gemini, get a new strategy.
 
     Args:
-        trials: trial kayıtlarının listesi (trials.json'daki format)
+        trials: list of trial records (trials.json format)
 
     Returns:
         dict: {"strategy": {...}, "reason": "..."}
@@ -69,11 +69,11 @@ def get_next_strategy(trials):
         system_instruction=SYSTEM_PROMPT,
     )
 
-    # Kullanıcı mesajını hazırla
+    # Prepare user message
     if len(trials) == 0:
         user_msg = "No trials yet. Suggest an initial strategy."
     else:
-        # Tüm trial geçmişini gönder
+        # Send full trial history
         lines = ["Trial history:"]
         for t in trials:
             density_info = ""
@@ -89,14 +89,14 @@ def get_next_strategy(trials):
                 f"{density_info}"
             )
 
-        # En iyi ve en kötü trial'ı vurgula
+        # Highlight best and worst trials
         best = max(trials, key=lambda t: t["dwell_time_ms"])
         worst = min(trials, key=lambda t: t["dwell_time_ms"])
         lines.append(f"\nBest: #{best['trial_number']} ({best['dwell_time_ms']}ms)")
         lines.append(f"Worst: #{worst['trial_number']} ({worst['dwell_time_ms']}ms)")
         lines.append(f"Total trials: {len(trials)}")
 
-        # Son trial'ın yoğunluk bilgisi
+        # Latest trial's density info
         latest = trials[-1]
         lines.append(f"\nCurrent density: {latest.get('density_score', 0):.2f} ({latest.get('density_category', 'unknown')})")
         lines.append(f"People in last 2min: {latest.get('person_count_2min', 0)}")
@@ -104,18 +104,18 @@ def get_next_strategy(trials):
         lines.append("\nWhat strategy next? JSON only.")
         user_msg = "\n".join(lines)
 
-    # Gemini'ye sor
+    # Query Gemini
     response = model.generate_content(user_msg)
     text = response.text.strip()
 
-    # Gemini bazen ```json ... ``` ile sarabilir, temizle
+    # Gemini sometimes wraps with ```json ... ```, clean it
     if text.startswith("```"):
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0].strip()
 
     raw = json.loads(text)
 
-    # Değerleri doğrula ve sınırla
+    # Validate and clamp values
     valid_animations = ["solid", "breathing", "rainbow_cycle", "blink", "wave", "color_wipe"]
     if raw.get("animation") not in valid_animations:
         raw["animation"] = "breathing"
