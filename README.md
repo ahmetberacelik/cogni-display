@@ -1,91 +1,91 @@
 # CogniDisplay
 
-AI destekli fiziksel ekran A/B test sistemi. ESP32-S3 ile kisi bekleme suresi ve ortam gurultusu olculur, veriler yerel Flask sunucusuna gonderilir, Google Gemini AI bir sonraki LED animasyon stratejisini belirler.
+An AI-powered physical display A/B testing system. ESP32-S3 measures person dwell time (HC-SR04 ultrasonic) and ambient noise (MAX4466 microphone), sends data to a local Flask server, which queries Google Gemini to decide the next LED animation strategy (WS2812B NeoPixel ring).
 
-**Dongu:** Gozlem → Analiz → Aksiyon
+**Closed-loop:** Observe → Analyze → Act
 
-## Sistem Mimarisi
+## System Architecture
 
 ```
 ┌─────────────┐         HTTP POST         ┌──────────────┐       API        ┌────────────┐
 │   ESP32-S3  │ ──────────────────────►   │ Flask Server │ ──────────────► │  Gemini AI │
 │             │ ◄──────────────────────   │  (Python)    │ ◄────────────── │            │
-│  Sensorler  │      Yeni Strateji        │              │    Strateji     │  Karar     │
-│  + LED Ring │                           │  Dashboard   │                 │  Motoru    │
+│  Sensors    │      New Strategy         │              │    Strategy     │  Decision  │
+│  + LED Ring │                           │  Dashboard   │                 │  Engine    │
 └─────────────┘                           └──────────────┘                 └────────────┘
 ```
 
-## Donanim Gereksinimleri
+## Hardware Requirements
 
-| Bilesen | Aciklama | Baglanti |
-|---------|----------|----------|
-| **ESP32-S3 DevKit** | Ana mikrodenetleyici | USB-C ile bilgisayara |
-| **HC-SR04** | Ultrasonik mesafe sensoru (5V) | GPIO4 (Trig), GPIO5 (Echo) |
-| **MAX4466** | Elektret mikrofon modulu | GPIO6 (ADC1_CH5) |
-| **WS2812B** | NeoPixel LED Ring (16 LED) | GPIO7 |
-| **Seviye Donusturucu** | 4 kanalli, cift yonlu (3.3V ↔ 5V) | HC-SR04 Echo + NeoPixel DIN |
+| Component | Description | Connection |
+|-----------|-------------|------------|
+| **ESP32-S3 DevKit** | Main microcontroller | USB-C to computer |
+| **HC-SR04** | Ultrasonic distance sensor (5V) | GPIO4 (Trig), GPIO5 (Echo) |
+| **MAX4466** | Electret microphone module | GPIO6 (ADC1_CH5) |
+| **WS2812B** | NeoPixel LED Ring (16 LEDs) | GPIO7 |
+| **Level Converter** | 4-channel, bi-directional (3.3V ↔ 5V) | HC-SR04 Echo + NeoPixel DIN |
 
-### Pin Atama Tablosu
+### Pin Assignment
 
 ```
-GPIO4  →  Seviye Donusturucu CH1  →  HC-SR04 Trig
-GPIO5  →  Seviye Donusturucu CH2  →  HC-SR04 Echo
-GPIO6  →  MAX4466 OUT (dogrudan, 3.3V uyumlu)
-GPIO7  →  Seviye Donusturucu CH3  →  330Ω  →  WS2812B DIN
+GPIO4  →  Level Converter CH1  →  HC-SR04 Trig
+GPIO5  →  Level Converter CH2  →  HC-SR04 Echo
+GPIO6  →  MAX4466 OUT (direct, 3.3V compatible)
+GPIO7  →  Level Converter CH3  →  330Ω  →  WS2812B DIN
 ```
 
-> **Not:** GPIO4-7 secimi, strapping/USB/JTAG/flash pinlerinden kacinmak icindir. GPIO6 ozellikle ADC1 icin secilmistir (ADC2, Wi-Fi ile cakisir).
+> **Note:** GPIO4-7 were chosen to avoid strapping/USB/JTAG/flash pins. GPIO6 is specifically selected for ADC1 (ADC2 conflicts with Wi-Fi).
 
-## Yazilim Gereksinimleri
+## Software Requirements
 
 ### ESP32 Firmware
 - **ESP-IDF v5.5.3**
-- `espressif/led_strip` komponenti (v3.0+, ilk derlemede otomatik indirilir)
+- `espressif/led_strip` component (v3.0+, auto-downloaded on first build)
 
-### Python Sunucu
+### Python Server
 - Python 3.10+
-- Bagimliliklar: Flask, google-generativeai, python-dotenv, pyserial
+- Dependencies: Flask, google-generativeai, python-dotenv, pyserial
 
-## Kurulum
+## Getting Started
 
-### 1. Repoyu Klonla
+### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<kullanici>/cogni-display.git
+git clone https://github.com/<username>/cogni-display.git
 cd cogni-display
 ```
 
-### 2. ESP32 Firmware Yapilandirmasi
+### 2. Configure ESP32 Firmware
 
-`main/header/config.h` dosyasinda Wi-Fi ve sunucu ayarlarini guncelle:
+Update Wi-Fi and server settings in `main/header/config.h`:
 
 ```c
-#define WIFI_SSID    "WiFi_Adi"
-#define WIFI_PASS    "WiFi_Sifresi"
-#define SERVER_URL   "http://<BILGISAYAR_IP>:5000/api/trial"
+#define WIFI_SSID    "Your_WiFi_Name"
+#define WIFI_PASS    "Your_WiFi_Password"
+#define SERVER_URL   "http://<YOUR_PC_IP>:5000/api/trial"
 ```
 
-### 3. Firmware Derleme ve Yukleme
+### 3. Build and Flash Firmware
 
 ```bash
 idf.py build
 idf.py flash -p COM6
 ```
 
-### 4. Python Sunucu Kurulumu
+### 4. Set Up Python Server
 
 ```bash
 cd server
 pip install -r requirements.txt
 ```
 
-`server/.env` dosyasi olustur:
+Create `server/.env`:
 
 ```
-GEMINI_API_KEY=buraya_api_anahtarin
+GEMINI_API_KEY=your_api_key_here
 ```
 
-Sunucuyu baslat:
+Start the server:
 
 ```bash
 python app.py
@@ -93,60 +93,60 @@ python app.py
 
 Dashboard: `http://localhost:5000/`
 
-> **Onemli:** Flask sunucusu COM6 seri portunu kullanir. Sunucu calisirken `idf.py monitor` calistirma — ayni anda iki program ayni portu kullanamaz. Seri ciktiyi dashboard uzerinden gorebilirsin.
+> **Important:** The Flask server uses COM6 serial port in a background thread. Do not run `idf.py monitor` while the server is running — two programs cannot use the same port simultaneously. You can view serial output through the dashboard.
 
-## Nasil Calisir?
+## How It Works
 
-### Durum Makinesi (ESP32)
+### State Machine (ESP32)
 
 ```
-         Mesafe < Esik               Bekleme suresi bitti
-  IDLE ──────────────► PERSON_DETECTED ──────────────────► PERSON_LEFT
-   ▲                                                           │
-   │                        Veri sunucuya gonderildi           │
-   └───────────────────────────────────────────────────────────┘
+        Distance < Threshold           Dwell time recorded
+  IDLE ──────────────────► PERSON_DETECTED ──────────────────► PERSON_LEFT
+   ▲                                                               │
+   │                          Data sent to server                  │
+   └───────────────────────────────────────────────────────────────┘
 ```
 
-1. **IDLE:** 100ms aralikla mesafe olcer. 2 dakika kimse gelmezse kirmizi LED yanar.
-2. **PERSON_DETECTED:** Kisi algilandi, bekleme suresi olculuyor, gurultu seviyesi kaydediliyor.
-3. **PERSON_LEFT:** Kisi ayrildi. Sensor verileri (bekleme suresi, gurultu, yogunluk) sunucuya POST edilir.
-4. Sunucu Gemini AI'dan yeni strateji alir ve ESP32'ye doner.
-5. ESP32 yeni LED animasyonunu uygular.
+1. **IDLE:** Measures distance every 100ms. After 2 minutes of no activity, a solid red LED turns on.
+2. **PERSON_DETECTED:** Person detected — dwell time is being measured, noise level is being recorded.
+3. **PERSON_LEFT:** Person departed. Sensor data (dwell time, noise, density) is POSTed to the server.
+4. The server queries Gemini AI for a new strategy and returns it to ESP32.
+5. ESP32 applies the new LED animation.
 
-### Animasyon Turleri
+### Animation Types
 
-| Animasyon | Aciklama |
-|-----------|----------|
-| `rainbow` | Goz alici gokkusagi donguleri |
-| `breathing` | Nefes alan yumusak parlama |
-| `color_wipe` | Renk silme efekti |
-| `theater_chase` | Tiyatro isigi kovalaması |
-| `wave` | Dalga seklinde renk gecisi |
-| `sparkle` | Rastgele parildama efekti |
+| Animation | Description |
+|-----------|-------------|
+| `rainbow` | Eye-catching rainbow cycles |
+| `breathing` | Smooth pulsing glow effect |
+| `color_wipe` | Sequential color fill |
+| `theater_chase` | Theater marquee chase lights |
+| `wave` | Wave-like color transition |
+| `sparkle` | Random sparkling effect |
 
-### Yogunluk Takibi
+### Density Tracking
 
-2 dakikalik kayar pencere uzerinden hesaplanan bileşik skor:
+Composite score calculated over a 2-minute sliding window:
 
-- Kisi sayisi: %40
-- Ortalama bekleme suresi: %30
-- Ortalama gurultu: %30
+- Person count: 40%
+- Average dwell time: 30%
+- Average noise level: 30%
 
-Kategoriler: `low` / `medium` / `high`
+Categories: `low` / `medium` / `high`
 
-## API Referansi
+## API Reference
 
-| Endpoint | Metod | Aciklama |
-|----------|-------|----------|
-| `/api/trial` | POST | ESP32 sensor verisi gonderir, yeni strateji alir |
-| `/api/status` | GET | Deneme gecmisi, istatistikler, guncel strateji |
-| `/api/serial` | GET | Filtrelenmis ESP32 seri loglari + canli durum |
-| `/api/serial/raw` | GET | Tum seri satirlari (mesafe olcumleri dahil) |
-| `/api/logs` | GET | Yapilandirilmis sunucu olay logu |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/trial` | POST | ESP32 sends sensor data, receives new strategy |
+| `/api/status` | GET | Trial history, statistics, current strategy |
+| `/api/serial` | GET | Filtered ESP32 serial logs + live state |
+| `/api/serial/raw` | GET | All serial lines (including distance measurements) |
+| `/api/logs` | GET | Structured server event log |
 
-### Ornek Veri Akisi
+### Example Data Flow
 
-**ESP32 → Sunucu:**
+**ESP32 → Server:**
 ```json
 {
   "dwell_time_ms": 4500,
@@ -158,7 +158,7 @@ Kategoriler: `low` / `medium` / `high`
 }
 ```
 
-**Sunucu → ESP32:**
+**Server → ESP32:**
 ```json
 {
   "animation": "wave",
@@ -166,65 +166,65 @@ Kategoriler: `low` / `medium` / `high`
   "g": 100,
   "b": 0,
   "speed": 75,
-  "reason": "Yuksek yogunluk ve orta gurultu seviyesi..."
+  "reason": "High density with moderate noise suggests an energetic warm-toned animation..."
 }
 ```
 
-## Proje Dosya Yapisi
+## Project Structure
 
 ```
 cogni-display/
 ├── main/
-│   ├── CMakeLists.txt              # Derleme dosyasi
-│   ├── idf_component.yml           # led_strip bagimliligi
+│   ├── CMakeLists.txt              # Build configuration
+│   ├── idf_component.yml           # led_strip dependency
 │   ├── header/
-│   │   ├── config.h                # Merkezi konfigürasyon
+│   │   ├── config.h                # Central configuration
 │   │   ├── wifi_manager.h
 │   │   ├── ultrasonic.h
 │   │   ├── mic_adc.h
 │   │   ├── led_animation.h
 │   │   └── http_client.h
 │   └── src/
-│       ├── main.c                  # Durum makinesi + kalibrasyon
-│       ├── wifi_manager.c          # Wi-Fi baglanti yonetimi
-│       ├── ultrasonic.c            # HC-SR04 surucu
-│       ├── mic_adc.c               # MAX4466 ADC okuma
-│       ├── led_animation.c         # WS2812B animasyonlari
-│       └── http_client.c           # HTTP istemci
+│       ├── main.c                  # State machine + calibration
+│       ├── wifi_manager.c          # Wi-Fi connection management
+│       ├── ultrasonic.c            # HC-SR04 driver
+│       ├── mic_adc.c               # MAX4466 ADC reading
+│       ├── led_animation.c         # WS2812B animations
+│       └── http_client.c           # HTTP client
 ├── server/
-│   ├── app.py                      # Flask sunucu
-│   ├── gemini_client.py            # Gemini AI entegrasyonu
-│   ├── serial_reader.py            # Seri port okuyucu
-│   ├── requirements.txt            # Python bagimliliklari
+│   ├── app.py                      # Flask server
+│   ├── gemini_client.py            # Gemini AI integration
+│   ├── serial_reader.py            # Serial port reader
+│   ├── requirements.txt            # Python dependencies
 │   ├── templates/
-│   │   └── dashboard.html          # Web arayuzu
-│   └── .env                        # API anahtari
-├── docs/                           # Proje dokumanlari
+│   │   └── dashboard.html          # Web dashboard
+│   └── .env                        # API key
+├── docs/                           # Project documentation
 ├── CLAUDE.md
 └── README.md
 ```
 
-## Donanim Notlari
+## Hardware Notes
 
-- ESP32 pinleri ucuz breadboard'larda guvenilir temas saglamayabilir. Pinler yanlis okuyor ise ESP32'yi breadboard disinda tutup F-M jumper kablo kullan.
-- MAX4466 uzerindeki trim pot kazanci ayarlar (25x-125x). Normal konusma icin hedef gurultu seviyesi: 20-40.
-- HC-SR04'un GND kablosu GND'ye baglanmali, 5V'ye degil.
-- Seviye donusturucu hem HC-SR04 (5V echo → 3.3V) hem NeoPixel (3.3V data → 5V) icin gereklidir.
+- ESP32 pins may not make reliable contact in cheap breadboards. If pins read incorrectly, keep the ESP32 outside the breadboard and use female-male (F-M) jumper cables.
+- The MAX4466 trim pot adjusts gain (25x–125x). Turn clockwise for higher sensitivity. Target noise level for normal speech: 20–40.
+- HC-SR04 GND wire must go to GND, not 5V (common wiring mistake).
+- The level converter is required for both HC-SR04 (5V echo → 3.3V) and NeoPixel (3.3V data → 5V).
 
-## Tasarim Kararlari
+## Design Decisions
 
-- **Uyarlanabilir baseline:** Baslangicta 4 saniye kalibrasyon, dinamik esikler (baseline x 0.70 algilama, baseline x 0.85 ayrilma), 60 saniye stabil okumadan sonra otomatik guncelleme.
-- **Bosta modu:** 2 dakika kimse algilanmazsa sabit kirmizi LED yanar (sunucuya istek gitmez).
-- **Graceful degradation:** Wi-Fi veya sunucu erisim hatasi durumunda mevcut animasyona devam edilir, hata loglanir, sistem cokmez.
-- **Seri log filtreleme:** Dashboard'da sadece anlamli olaylar gosterilir (kisi algilama, bekleme, yogunluk, hata). Ham loglar ayri endpoint'ten erisile bilir.
+- **Adaptive baseline:** 4-second startup calibration, dynamic thresholds (baseline × 0.70 detect, baseline × 0.85 depart), auto-updates after 60 seconds of stable readings.
+- **Idle mode:** 2 minutes with no person detected → solid red LED (no server request). Resumes normal flow on next detection.
+- **Graceful degradation:** If Wi-Fi or server is unreachable, the current animation continues, the error is logged, and the system never crashes.
+- **Serial log filtering:** The dashboard shows only meaningful events (person detection, dwell, density, errors). Raw logs are available via a separate endpoint.
 
-## Teknolojiler
+## Tech Stack
 
 - **Firmware:** C, ESP-IDF 5.5.3, FreeRTOS
-- **Sunucu:** Python, Flask, Google Gemini AI
-- **Arayuz:** HTML/CSS/JS, Chart.js
-- **Iletisim:** HTTP/JSON, UART (seri port)
+- **Server:** Python, Flask, Google Gemini AI
+- **Frontend:** HTML/CSS/JS, Chart.js
+- **Communication:** HTTP/JSON, UART (serial)
 
-## Lisans
+## License
 
-Bu proje egitim amacli gelistirilmistir.
+This project was developed for educational purposes.
